@@ -2,3 +2,4 @@ flask==3.0.3
 opentelemetry-distro==0.48b0
 opentelemetry-exporter-otlp==1.27.0
 opentelemetry-instrumentation-flask==0.48b0
+setuptools==75.1.0  # provides pkg_resources, needed by opentelemetry-instrument 0.48b0

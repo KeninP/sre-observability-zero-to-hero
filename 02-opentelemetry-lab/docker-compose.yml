@@ -19,6 +19,7 @@ services:
       SLOW_RATE: "0.05"
       SLOW_MS: "800"
     depends_on: [otel-collector]
+    restart: unless-stopped
 
   loadgen:
     image: curlimages/curl:8.10.1
