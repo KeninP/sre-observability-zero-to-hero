@@ -1,0 +1,90 @@
+name: Lab CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    name: Validate configs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: OTel Collector configs
+        run: |
+          docker run --rm -v "$PWD:/w" otel/opentelemetry-collector-contrib:0.111.0 \
+            validate --config=/w/02-opentelemetry-lab/otel-collector/config.yaml
+          docker run --rm -v "$PWD:/w" -e DT_ENV_URL=https://example.live.dynatrace.com -e DT_API_TOKEN=dummy \
+            otel/opentelemetry-collector-contrib:0.111.0 \
+            validate --config=/w/04-dynatrace/collector-dynatrace.yaml
+
+      - name: Prometheus config and alert rules
+        run: |
+          docker run --rm -v "$PWD/02-opentelemetry-lab/prometheus:/etc/prometheus" --entrypoint promtool \
+            prom/prometheus:v2.54.1 check config /etc/prometheus/prometheus.yml
+
+      - name: Kubernetes manifests
+        run: |
+          docker run --rm -v "$PWD/03-kubernetes-observability/manifests:/m" ghcr.io/yannh/kubeconform:v0.6.7 \
+            -strict -summary /m
+
+      - name: Shell scripts
+        run: shellcheck 05-incident-response/scripts/*.sh
+
+  lab:
+    name: Run the lab end-to-end
+    runs-on: ubuntu-latest
+    needs: validate
+    defaults:
+      run:
+        working-directory: 02-opentelemetry-lab
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start the stack
+        run: docker compose up -d --build
+
+      - name: Wait for telemetry in Prometheus
+        run: |
+          for i in $(seq 1 30); do
+            n=$(curl -s 'http://localhost:9090/api/v1/query' \
+                  --data-urlencode 'query=sum(http_server_duration_milliseconds_count{job="checkout-service"})' \
+                | jq -r '.data.result[0].value[1] // "0"')
+            echo "attempt $i: http requests recorded = $n"
+            if [ "${n%.*}" -gt 0 ]; then exit 0; fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Custom metric exported
+        run: |
+          curl -s 'http://localhost:9090/api/v1/query' --data-urlencode 'query=sum(shop_orders_total)' \
+            | jq -e '.data.result | length > 0'
+
+      - name: Traces reached Jaeger
+        run: |
+          for i in $(seq 1 12); do
+            curl -s http://localhost:16686/api/services | jq -e '.data | index("checkout-service")' && exit 0
+            sleep 5
+          done
+          exit 1
+
+      - name: Alert rules loaded
+        run: |
+          curl -s http://localhost:9090/api/v1/rules \
+            | jq -e '[.data.groups[].rules[].name] | index("CheckoutHighErrorRate")'
+
+      - name: Grafana dashboard provisioned
+        run: |
+          curl -s http://localhost:3000/api/health | jq -e '.database == "ok"'
+          curl -s http://localhost:3000/api/dashboards/uid/checkout-red | jq -e '.dashboard.title'
+
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs --tail=100
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

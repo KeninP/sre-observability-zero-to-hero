@@ -1,0 +1,39 @@
+# Drop-in exporter config to send the lab's telemetry to Dynatrace over OTLP.
+# Token scopes needed: openTelemetryTrace.ingest, metrics.ingest, logs.ingest
+# Run with: DT_ENV_URL=https://<env-id>.live.dynatrace.com DT_API_TOKEN=dt0c01.... otelcol --config collector-dynatrace.yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+  # Dynatrace ingests metrics as DELTA temporality; SDKs default to cumulative
+  cumulativetodelta: {}
+  batch: {}
+
+exporters:
+  otlphttp/dynatrace:
+    endpoint: ${env:DT_ENV_URL}/api/v2/otlp
+    headers:
+      Authorization: "Api-Token ${env:DT_API_TOKEN}"
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/dynatrace]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, cumulativetodelta, batch]
+      exporters: [otlphttp/dynatrace]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/dynatrace]

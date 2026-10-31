@@ -1,0 +1,42 @@
+# Values for the official chart:
+#   helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+#   helm install otel-agent open-telemetry/opentelemetry-collector -n observability --create-namespace -f collector-values.yaml
+mode: daemonset
+
+image:
+  repository: otel/opentelemetry-collector-k8s
+
+presets:
+  # Adds k8s.namespace.name, k8s.pod.name, k8s.deployment.name ... to every signal
+  kubernetesAttributes:
+    enabled: true
+  # Pod/container CPU, memory, network from the kubelet on each node
+  kubeletMetrics:
+    enabled: true
+  # Tails container logs from /var/log/pods
+  logsCollection:
+    enabled: true
+
+resources:
+  limits:
+    cpu: 250m
+    memory: 512Mi
+
+config:
+  processors:
+    memory_limiter:
+      check_interval: 1s
+      limit_percentage: 80
+      spike_limit_percentage: 25
+  exporters:
+    # Replace with your backend: an OTLP gateway, Dynatrace (chapter 04), Grafana Cloud...
+    debug:
+      verbosity: basic
+  service:
+    pipelines:
+      traces:
+        exporters: [debug]
+      metrics:
+        exporters: [debug]
+      logs:
+        exporters: [debug]
